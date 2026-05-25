@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language Model — Arquitectura</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #f4f1eb;
+    --surface:  #ffffff;
+    --border:   #ddd8ce;
+    --text:     #1a1814;
+    --dim:      #8a8580;
+    --c-input:  #2563eb;
+    --c-emb:    #7c3aed;
+    --c-gru:    #059669;
+    --c-drop:   #d97706;
+    --c-dense:  #dc2626;
+    --c-out:    #0891b2;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+    padding: 2rem 1.5rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 0.3rem;
+  }
+  .subtitle {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .intro {
+    font-size: 0.9rem;
+    color: var(--dim);
+    margin-bottom: 2rem;
+    line-height: 1.5;
+  }
+
+  /* ---- DIAGRAM ---- */
+  .diagram {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .block-box {
+    border: 2px solid;
+    border-radius: 8px;
+    padding: 0.7rem 1rem;
+    text-align: center;
+    transition: transform 0.12s, box-shadow 0.12s;
+    background: var(--surface);
+    min-width: 90px;
+  }
+
+  .block:hover .block-box,
+  .block.active .block-box {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  }
+
+  .block.active .block-box { box-shadow: 0 6px 20px rgba(0,0,0,0.18); }
+
+  .block-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+  }
+  .block-shape {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--dim);
+    line-height: 1.4;
+  }
+  .block-shape .shape-val {
+    font-weight: 600;
+  }
+
+  /* arrows */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 0 4px;
+  }
+  .arrow-line {
+    width: 28px;
+    height: 2px;
+    background: var(--border);
+    position: relative;
+  }
+  .arrow-line::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: -4px;
+    border: 5px solid transparent;
+    border-left: 7px solid var(--border);
+  }
+  .arrow-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.55rem;
+    color: var(--dim);
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+
+  /* ---- INFO PANEL ---- */
+  .info-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.4rem;
+    margin-bottom: 1.5rem;
+    min-height: 160px;
+    transition: border-color 0.2s;
+  }
+
+  .info-panel.hidden { display: none; }
+
+  .info-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.7rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .info-shape-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--dim);
+  }
+  .info-shape-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+
+  .info-body {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .info-body p { margin-bottom: 0.6rem; }
+  .info-body p:last-child { margin-bottom: 0; }
+  .info-body code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    background: var(--bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+  .info-body strong { font-weight: 600; }
+  .dim-explain {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.8rem;
+  }
+  .dim-pill {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    border-radius: 4px;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid;
+    line-height: 1.3;
+  }
+
+  .hint {
+    font-size: 0.82rem;
+    color: var(--dim);
+    font-style: italic;
+    text-align: center;
+  }
+
+  /* color per block */
+  .b-input  .block-box { border-color: var(--c-input);  }
+  .b-input  .block-name { color: var(--c-input); }
+  .b-input.active .block-box { background: color-mix(in srgb, var(--c-input) 8%, white); }
+
+  .b-emb    .block-box { border-color: var(--c-emb);    }
+  .b-emb    .block-name { color: var(--c-emb); }
+  .b-emb.active .block-box { background: color-mix(in srgb, var(--c-emb) 8%, white); }
+
+  .b-gru    .block-box { border-color: var(--c-gru);    }
+  .b-gru    .block-name { color: var(--c-gru); }
+  .b-gru.active .block-box { background: color-mix(in srgb, var(--c-gru) 8%, white); }
+
+  .b-drop   .block-box { border-color: var(--c-drop);   }
+  .b-drop   .block-name { color: var(--c-drop); }
+  .b-drop.active .block-box { background: color-mix(in srgb, var(--c-drop) 8%, white); }
+
+  .b-dense  .block-box { border-color: var(--c-dense);  }
+  .b-dense  .block-name { color: var(--c-dense); }
+  .b-dense.active .block-box { background: color-mix(in srgb, var(--c-dense) 8%, white); }
+
+  .b-out    .block-box { border-color: var(--c-out);    }
+  .b-out    .block-name { color: var(--c-out); }
+  .b-out.active .block-box { background: color-mix(in srgb, var(--c-out) 8%, white); }
+
+  /* params table */
+  .params-row {
+    display: flex;
+    gap: 2rem;
+    margin-top: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .param-item {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+  }
+  .param-label { color: var(--dim); }
+  .param-val   { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Listing 15.4</h1>
+<div class="subtitle">Arquitectura del language model</div>
+<div class="intro">Hacé click en cualquier bloque para ver qué hace y por qué tiene esas dimensiones.</div>
+
+<div class="diagram" id="diagram">
+
+  <div class="block b-input" data-key="input">
+    <div class="block-box">
+      <div class="block-name">Input</div>
+      <div class="block-shape">
+        <span class="shape-val">(64, 100)</span><br>
+        int tokens
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div></div>
+
+  <div class="block b-emb" data-key="emb">
+    <div class="block-box">
+      <div class="block-name">Embedding</div>
+      <div class="block-shape">
+        67 × 256<br>
+        <span class="shape-val">→ (64, 100, 256)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div></div>
+
+  <div class="block b-gru" data-key="gru">
+    <div class="block-box">
+      <div class="block-name">GRU</div>
+      <div class="block-shape">
+        1024 unidades<br>
+        <span class="shape-val">→ (64, 100, 1024)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div></div>
+
+  <div class="block b-drop" data-key="drop">
+    <div class="block-box">
+      <div class="block-name">Dropout</div>
+      <div class="block-shape">
+        p = 0.1<br>
+        <span class="shape-val">→ (64, 100, 1024)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div></div>
+
+  <div class="block b-dense" data-key="dense">
+    <div class="block-box">
+      <div class="block-name">Dense</div>
+      <div class="block-shape">
+        + softmax<br>
+        <span class="shape-val">→ (64, 100, 67)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><div class="arrow-line"></div></div>
+
+  <div class="block b-out" data-key="out">
+    <div class="block-box">
+      <div class="block-name">Output</div>
+      <div class="block-shape">
+        prob. dist.<br>
+        <span class="shape-val">67 chars</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="info-panel hidden" id="info-panel">
+  <div class="info-header">
+    <span class="info-name" id="info-name"></span>
+    <span class="info-shape-label">output shape: </span>
+    <span class="info-shape-val" id="info-shape"></span>
+  </div>
+  <div class="info-body" id="info-body"></div>
+</div>
+
+<div class="hint" id="hint">^ hacé click en un bloque</div>
+
+<script>
+const INFO = {
+  input: {
+    name: 'Input',
+    shape: '(batch=64, seq_len=100)',
+    color: '#2563eb',
+    body: `
+      <p>Cada muestra es una secuencia de <strong>100 enteros</strong>. Cada entero representa un caracter del vocabulario (hay 67 en total).</p>
+      <p>El batch de 64 significa que entrenamos con 64 secuencias a la vez.</p>
+      <div class="dim-explain">
+        <div class="dim-pill" style="border-color:#2563eb;color:#2563eb">64 = batch size</div>
+        <div class="dim-pill" style="border-color:#2563eb;color:#2563eb">100 = sequence length (chars)</div>
+      </div>
+      <div class="params-row">
+        <div class="param-item"><span class="param-label">parámetros: </span><span class="param-val">0</span></div>
+      </div>
+    `
+  },
+  emb: {
+    name: 'Embedding',
+    shape: '(64, 100, 256)',
+    color: '#7c3aed',
+    body: `
+      <p>Convierte cada entero en un <strong>vector de 256 números</strong>. En lugar de tratar los caracteres como categorías sin relación, el modelo aprende una representación continua donde caracteres similares quedan cerca.</p>
+      <p>La tabla tiene 67 filas (una por caracter) × 256 columnas. Lookup: dado el entero <code>i</code>, devuelve la fila <code>i</code>.</p>
+      <div class="dim-explain">
+        <div class="dim-pill" style="border-color:#7c3aed;color:#7c3aed">67 = vocab size</div>
+        <div class="dim-pill" style="border-color:#7c3aed;color:#7c3aed">256 = embedding dim (elegido)</div>
+      </div>
+      <div class="params-row">
+        <div class="param-item"><span class="param-label">parámetros: </span><span class="param-val">67 × 256 = 17,152</span></div>
+      </div>
+    `
+  },
+  gru: {
+    name: 'GRU',
+    shape: '(64, 100, 1024)',
+    color: '#059669',
+    body: `
+      <p>Procesa la secuencia <strong>paso a paso</strong>. En cada posición <code>t</code>, recibe el embedding del caracter actual y el estado oculto del paso anterior, y produce un nuevo estado de 1024 dimensiones.</p>
+      <p><code>return_sequences=True</code> hace que devuelva el estado en <em>cada</em> posición, no solo el final. Así el Dense puede predecir el siguiente caracter en cada paso.</p>
+      <div class="dim-explain">
+        <div class="dim-pill" style="border-color:#059669;color:#059669">1024 = hidden dim (elegido)</div>
+        <div class="dim-pill" style="border-color:#059669;color:#059669">100 pasos → 100 estados</div>
+      </div>
+      <div class="params-row">
+        <div class="param-item"><span class="param-label">parámetros: </span><span class="param-val">~3,938,304</span></div>
+        <div class="param-item"><span class="param-label">% del total: </span><span class="param-val">97.9%</span></div>
+      </div>
+    `
+  },
+  drop: {
+    name: 'Dropout',
+    shape: '(64, 100, 1024)',
+    color: '#d97706',
+    body: `
+      <p>Durante el entrenamiento, apaga aleatoriamente el <strong>10%</strong> de las activaciones en cada paso. Esto fuerza al modelo a no depender de ninguna neurona en particular y mejora la generalización.</p>
+      <p>En inferencia (generación), el Dropout está desactivado y pasan todos los valores. No cambia la shape en ningún caso.</p>
+      <div class="dim-explain">
+        <div class="dim-pill" style="border-color:#d97706;color:#d97706">p = 0.1 → apaga 10%</div>
+        <div class="dim-pill" style="border-color:#d97706;color:#d97706">shape sin cambio</div>
+      </div>
+      <div class="params-row">
+        <div class="param-item"><span class="param-label">parámetros: </span><span class="param-val">0</span></div>
+      </div>
+    `
+  },
+  dense: {
+    name: 'Dense + Softmax',
+    shape: '(64, 100, 67)',
+    color: '#dc2626',
+    body: `
+      <p>Una capa lineal que proyecta los 1024 valores del GRU a <strong>67 números</strong>, uno por cada caracter del vocabulario. El softmax los convierte en una <strong>distribución de probabilidad</strong>.</p>
+      <p>El resultado en cada posición es: "dada toda la historia vista hasta acá, ¿qué caracter viene después?"</p>
+      <div class="dim-explain">
+        <div class="dim-pill" style="border-color:#dc2626;color:#dc2626">1024 → 67</div>
+        <div class="dim-pill" style="border-color:#dc2626;color:#dc2626">softmax: suma = 1.0</div>
+      </div>
+      <div class="params-row">
+        <div class="param-item"><span class="param-label">parámetros: </span><span class="param-val">1024 × 67 + 67 = 68,675</span></div>
+      </div>
+    `
+  },
+  out: {
+    name: 'Output',
+    shape: '(64, 100, 67)',
+    color: '#0891b2',
+    body: `
+      <p>Para cada una de las 64 secuencias, y para cada una de las 100 posiciones, el modelo produce una <strong>distribución de probabilidad sobre los 67 caracteres</strong>.</p>
+      <p>Durante el entrenamiento, se compara esta distribución con el caracter real (<code>y[i]</code>) usando cross-entropy. Durante la generación, se elige el caracter con mayor probabilidad (o se samplea).</p>
+      <div class="dim-explain">
+        <div class="dim-pill" style="border-color:#0891b2;color:#0891b2">64 secuencias</div>
+        <div class="dim-pill" style="border-color:#0891b2;color:#0891b2">100 predicciones por secuencia</div>
+        <div class="dim-pill" style="border-color:#0891b2;color:#0891b2">67 probabilidades cada una</div>
+      </div>
+      <div class="params-row">
+        <div class="param-item"><span class="param-label">total params: </span><span class="param-val">4,024,131</span></div>
+        <div class="param-item"><span class="param-label">tamaño: </span><span class="param-val">15.35 MB</span></div>
+      </div>
+    `
+  }
+};
+
+const panel   = document.getElementById('info-panel');
+const infoName  = document.getElementById('info-name');
+const infoShape = document.getElementById('info-shape');
+const infoBody  = document.getElementById('info-body');
+const hint      = document.getElementById('hint');
+
+let current = null;
+
+document.querySelectorAll('.block').forEach(el => {
+  el.addEventListener('click', () => {
+    const key = el.dataset.key;
+    if (current === key) {
+      // deselect
+      el.classList.remove('active');
+      panel.classList.add('hidden');
+      hint.style.display = 'block';
+      current = null;
+      return;
+    }
+    document.querySelectorAll('.block').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    current = key;
+
+    const d = INFO[key];
+    infoName.textContent  = d.name;
+    infoName.style.color  = d.color;
+    infoShape.textContent = d.shape;
+    infoShape.style.color = d.color;
+    infoBody.innerHTML    = d.body;
+    panel.style.borderColor = d.color;
+    panel.classList.remove('hidden');
+    hint.style.display = 'none';
+  });
+});
+</script>
+</body>
+</html>
