@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language Model — Offset de 1</title>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #0e0e0e;
+    --surface: #181818;
+    --border:  #2a2a2a;
+    --text:    #d4cfc8;
+    --dim:     #5a5550;
+    --x-col:   #4a9eff;
+    --y-col:   #ff7c4a;
+    --hi-col:  #a78bfa;
+    --x-bg:    rgba(74,158,255,0.13);
+    --y-bg:    rgba(255,124,74,0.13);
+    --hi-bg:   rgba(167,139,250,0.22);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IM Fell English', serif;
+    min-height: 100vh;
+    padding: 2rem 1.5rem;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 0.3rem;
+  }
+  .subtitle {
+    font-size: 1.4rem;
+    font-style: italic;
+    margin-bottom: 1.4rem;
+  }
+
+  .callout {
+    border-left: 3px solid var(--hi-col);
+    padding: 0.7rem 1rem;
+    background: rgba(167,139,250,0.06);
+    border-radius: 0 4px 4px 0;
+    font-size: 0.92rem;
+    font-style: italic;
+    line-height: 1.55;
+    margin-bottom: 1.8rem;
+  }
+  .callout code {
+    font-family: 'JetBrains Mono', monospace;
+    font-style: normal;
+    font-size: 0.76rem;
+    background: var(--border);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+
+  /* strip */
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .text-strip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    line-height: 1.75;
+    word-break: break-all;
+    margin-bottom: 1rem;
+  }
+  .text-strip span.in-x  { background: var(--x-bg);  color: var(--x-col); border-radius: 2px; }
+  .text-strip span.in-y  { background: var(--y-bg);  color: var(--y-col); border-radius: 2px; }
+  .text-strip span.in-both { background: var(--hi-bg); color: var(--hi-col); border-radius: 2px; }
+
+  /* controls */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.8rem;
+    flex-wrap: wrap;
+  }
+  .controls label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+  input[type=range] {
+    flex: 1; min-width: 160px;
+    accent-color: var(--hi-col);
+    cursor: pointer;
+  }
+  .pos-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.25rem 0.6rem;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+
+  /* aligned rows — THE MAIN THING */
+  .aligned-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.2rem 1rem 1rem;
+    margin-bottom: 1.5rem;
+    overflow-x: auto;
+  }
+
+  .row-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+  }
+  .row-label.x { color: var(--x-col); }
+  .row-label.y { color: var(--y-col); }
+
+  .char-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+    margin-bottom: 0.25rem;
+  }
+
+  .char-cell {
+    width: 22px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    border-radius: 3px;
+    flex-shrink: 0;
+    transition: background 0.1s;
+    cursor: default;
+    position: relative;
+  }
+  .char-cell.cx { background: var(--x-bg); color: var(--x-col); }
+  .char-cell.cy { background: var(--y-bg); color: var(--y-col); }
+  .char-cell.highlighted {
+    outline: 2px solid var(--hi-col);
+    z-index: 2;
+  }
+
+  /* connector lines between rows */
+  .connector-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+    margin-bottom: 0.2rem;
+    height: 14px;
+    align-items: center;
+  }
+  .connector {
+    width: 22px;
+    text-align: center;
+    font-size: 0.55rem;
+    color: var(--dim);
+    flex-shrink: 0;
+  }
+  .connector.active { color: var(--hi-col); font-size: 0.7rem; }
+
+  /* index row */
+  .index-row {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+    margin-bottom: 0.6rem;
+  }
+  .idx-cell {
+    width: 22px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.5rem;
+    color: var(--dim);
+    flex-shrink: 0;
+  }
+  .idx-cell.active { color: var(--hi-col); }
+
+  .row-separator {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 0.8rem 0;
+  }
+
+  .highlight-note {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--hi-col);
+    margin-top: 0.7rem;
+    min-height: 1.2rem;
+  }
+
+  /* legend */
+  .legend {
+    display: flex;
+    gap: 1.4rem;
+    flex-wrap: wrap;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.67rem;
+    color: var(--dim);
+    letter-spacing: 0.05em;
+  }
+  .legend-item { display: flex; align-items: center; gap: 0.4rem; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .legend-dot.x    { background: var(--x-col); }
+  .legend-dot.y    { background: var(--y-col); }
+  .legend-dot.hi   { border: 2px solid var(--hi-col); }
+</style>
+</head>
+<body>
+
+<h1>Listings 15.1 — 15.2</h1>
+<div class="subtitle">¿Cómo aprende el modelo? El offset de 1.</div>
+
+<div class="callout">
+  <code>x</code> e <code>y</code> son el mismo texto corrido un lugar.
+  En cada posición <em>i</em>, el modelo ve <code>x[i]</code> y tiene que predecir <code>y[i]</code>,
+  que es simplemente el caracter siguiente. Pasá el mouse por los caracteres para verlo.
+</div>
+
+<div class="section-label">Texto completo — ventana de 100 caracteres</div>
+<div class="text-strip" id="full-strip"></div>
+
+<div class="controls">
+  <label>ventana (inicio)</label>
+  <input type="range" id="slider" min="0" value="0">
+  <div class="pos-badge" id="pos-badge">pos 0</div>
+</div>
+
+<!-- MAIN VISUALIZATION -->
+<div class="section-label">x e y alineados — cada columna es un par de entrenamiento</div>
+<div class="aligned-box">
+  <div class="row-label x">x &nbsp;—&nbsp; input &nbsp;(shakespeare[start : start+100])</div>
+  <div class="char-row" id="row-x"></div>
+
+  <div class="connector-row" id="connectors"></div>
+
+  <div class="row-label y">y &nbsp;—&nbsp; label &nbsp;(shakespeare[start+1 : start+101])</div>
+  <div class="char-row" id="row-y"></div>
+
+  <hr class="row-separator">
+
+  <div class="index-row" id="row-idx"></div>
+  <div class="highlight-note" id="hi-note">&nbsp;</div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot x"></div> x — lo que ve el modelo</div>
+  <div class="legend-item"><div class="legend-dot y"></div> y — lo que tiene que predecir</div>
+  <div class="legend-item"><div class="legend-dot hi"></div> posición seleccionada</div>
+</div>
+
+<script>
+const SHAKESPEARE = `First Citizen:
+Before we proceed any further, hear me speak.
+
+All:
+Speak, speak.
+
+First Citizen:
+You are all resolved rather to die than to famish?
+
+All:
+Resolved. resolved.
+
+First Citizen:
+First, you know Caius Marcius is chief enemy to the people.
+
+All:
+We know't, we know't.
+
+First Citizen:
+Let us kill him, and we'll have corn at our own price.
+Is't a verdict?
+
+All:
+No more talking on't; let it be done: away, away!
+
+Second Citizen:
+One word, good citizens.
+
+First Citizen:
+We are accounted poor citizens, the patricians good.
+What authority surfeits on would relieve us: if they
+would yield us but the superfluity, while it were
+wholesome, we might guess they relieved us humanely;
+but they think we are too dear: the leanness that
+afflicts us, the object of our misery, is as an
+inventory to particularise their abundance; our
+sufferance is a gain to them Let us revenge this with
+our pikes, ere we become rakes: for the gods know I
+speak this in hunger for bread, not in thirst for revenge.`;
+
+const SEQ_LEN = 30; // show 30 for readability
+const maxStart = SHAKESPEARE.length - SEQ_LEN - 2;
+
+const slider    = document.getElementById('slider');
+const posBadge  = document.getElementById('pos-badge');
+const fullStrip = document.getElementById('full-strip');
+const rowX      = document.getElementById('row-x');
+const rowY      = document.getElementById('row-y');
+const connRow   = document.getElementById('connectors');
+const rowIdx    = document.getElementById('row-idx');
+const hiNote    = document.getElementById('hi-note');
+
+slider.max = maxStart;
+
+function disp(c) {
+  if (c === '\n') return '↵';
+  if (c === ' ')  return '·';
+  return c;
+}
+
+function escHtml(c) {
+  if (c === '<') return '&lt;';
+  if (c === '>') return '&gt;';
+  if (c === '&') return '&amp;';
+  return c;
+}
+
+let hovered = null;
+
+function highlight(i) {
+  hovered = i;
+  document.querySelectorAll('.char-cell').forEach(el => el.classList.remove('highlighted'));
+  document.querySelectorAll('.connector').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.idx-cell').forEach(el => el.classList.remove('active'));
+
+  if (i === null) { hiNote.innerHTML = '&nbsp;'; return; }
+
+  const cells = document.querySelectorAll(`.char-cell[data-i="${i}"]`);
+  cells.forEach(el => el.classList.add('highlighted'));
+
+  const conn = document.querySelector(`.connector[data-i="${i}"]`);
+  if (conn) conn.classList.add('active');
+
+  const idx = document.querySelector(`.idx-cell[data-i="${i}"]`);
+  if (idx) idx.classList.add('active');
+
+  const start = parseInt(slider.value);
+  const xChar = SHAKESPEARE[start + i];
+  const yChar = SHAKESPEARE[start + i + 1];
+  const xD = xChar === '\n' ? '\\n' : (xChar === ' ' ? 'space' : `'${escHtml(xChar)}'`);
+  const yD = yChar === '\n' ? '\\n' : (yChar === ' ' ? 'space' : `'${escHtml(yChar)}'`);
+
+  hiNote.innerHTML =
+    `posición [${i}] &nbsp;—&nbsp; ` +
+    `el modelo ve x[${i}] = <span style="color:var(--x-col)">${xD}</span> &nbsp;→&nbsp; ` +
+    `tiene que predecir y[${i}] = <span style="color:var(--y-col)">${yD}</span> ` +
+    `<span style="color:var(--dim)">(= x[${i+1}] en el texto original)</span>`;
+}
+
+function render() {
+  const start = parseInt(slider.value);
+  posBadge.textContent = `pos ${start}`;
+
+  // full strip
+  let html = '';
+  for (let i = 0; i < SHAKESPEARE.length; i++) {
+    const inX    = i >= start     && i < start + SEQ_LEN;
+    const inY    = i >= start + 1 && i < start + SEQ_LEN + 1;
+    let cls = '';
+    if (inX && inY) cls = 'in-both';
+    else if (inX)   cls = 'in-x';
+    else if (inY)   cls = 'in-y';
+    const c = SHAKESPEARE[i];
+    const d = c === '\n' ? '↵\n' : (c === ' ' ? '·' : escHtml(c));
+    html += cls ? `<span class="${cls}">${d}</span>` : (c === '\n' ? '↵\n' : escHtml(c));
+  }
+  fullStrip.innerHTML = html;
+
+  // aligned rows
+  let xHtml = '', yHtml = '', connHtml = '', idxHtml = '';
+  for (let i = 0; i < SEQ_LEN; i++) {
+    const xc = SHAKESPEARE[start + i];
+    const yc = SHAKESPEARE[start + i + 1];
+    xHtml += `<div class="char-cell cx" data-i="${i}" title="x[${i}]">${escHtml(disp(xc))}</div>`;
+    yHtml += `<div class="char-cell cy" data-i="${i}" title="y[${i}]">${escHtml(disp(yc))}</div>`;
+    connHtml += `<div class="connector" data-i="${i}">|</div>`;
+    idxHtml  += `<div class="idx-cell" data-i="${i}">${i}</div>`;
+  }
+
+  rowX.innerHTML    = xHtml;
+  rowY.innerHTML    = yHtml;
+  connRow.innerHTML = connHtml;
+  rowIdx.innerHTML  = idxHtml;
+
+  // re-attach hover listeners
+  document.querySelectorAll('.char-cell').forEach(el => {
+    el.addEventListener('mouseenter', () => highlight(parseInt(el.dataset.i)));
+    el.addEventListener('mouseleave', () => highlight(null));
+  });
+
+  hiNote.innerHTML = '&nbsp;';
+}
+
+slider.addEventListener('input', render);
+render();
+</script>
+</body>
+</html>
