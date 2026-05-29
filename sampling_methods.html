@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Sampling methods</title>
+<style>
+  body { font-family: monospace; max-width: 720px; margin: 40px auto; padding: 0 20px; }
+  .tabs { margin-bottom: 16px; }
+  .tabs button { margin-right: 4px; padding: 4px 12px; cursor: pointer; }
+  .tabs button.active { font-weight: bold; border-bottom: 2px solid black; }
+  .controls { margin: 10px 0; }
+  .legend { font-size: 12px; margin-bottom: 4px; }
+  .legend span { display: inline-block; width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; }
+  #chart { display: flex; align-items: flex-end; gap: 4px; height: 140px; overflow: hidden; margin: 16px 0 0 0; }
+  .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .pair { display: flex; align-items: flex-end; width: 100%; gap: 1px; height: 120px; }
+  .b  { flex: 1; background: #d0d0d0; max-height: 120px; }
+  .r  { flex: 1; max-height: 120px; }
+  .r.selected  { background: rgba(220,120,30,0.9); }
+  .r.discarded { background: rgba(70,130,180,0.55); }
+  .r.temp-bar  { background: rgba(160,50,160,0.8); }
+  .lbl { font-size: 10px; margin-top: 3px; text-align: center; }
+  .pct { font-size: 9px; color: #555; min-height: 12px; }
+  #info { margin-top: 20px; border-left: 3px solid #aaa; padding: 10px 14px; font-size: 13px; line-height: 1.8; background: #f9f9f9; }
+  #info b { font-weight: bold; }
+  table { border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  td, th { padding: 3px 10px; border: 1px solid #ccc; }
+  th { background: #eee; }
+  button.action { margin-top: 10px; padding: 4px 12px; cursor: pointer; }
+  #result { margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h2>Metodos de sampleo</h2>
+
+<div class="tabs">
+  <button class="active" onclick="setMethod('topk', event)">Top-k</button>
+  <button onclick="setMethod('topp', event)">Top-p</button>
+  <button onclick="setMethod('temp', event)">Temperature</button>
+</div>
+
+<div id="ctrl-topk">
+  <div class="controls">
+    <label>k = <span id="k-val">5</span></label>&nbsp;
+    <input type="range" min="1" max="15" value="5" oninput="document.getElementById('k-val').textContent=this.value; update()">
+  </div>
+  <div class="legend">
+    <span style="background:#d0d0d0"></span>base &nbsp;
+    <span style="background:rgba(220,120,30,0.9)"></span>top-k seleccionada &nbsp;
+    <span style="background:rgba(70,130,180,0.55)"></span>descartada
+  </div>
+</div>
+
+<div id="ctrl-topp" style="display:none">
+  <div class="controls">
+    <label>p = <span id="p-val">0.80</span></label>&nbsp;
+    <input type="range" min="1" max="99" value="80" oninput="document.getElementById('p-val').textContent=(this.value/100).toFixed(2); update()">
+  </div>
+  <div class="legend">
+    <span style="background:#d0d0d0"></span>base &nbsp;
+    <span style="background:rgba(220,120,30,0.9)"></span>top-p seleccionada &nbsp;
+    <span style="background:rgba(70,130,180,0.55)"></span>descartada
+  </div>
+</div>
+
+<div id="ctrl-temp" style="display:none">
+  <div class="controls">
+    <label>τ = <span id="t-val">1.00</span></label>&nbsp;
+    <input type="range" min="10" max="300" value="100" step="10" oninput="document.getElementById('t-val').textContent=(this.value/100).toFixed(2); update()">
+  </div>
+  <div class="legend">
+    <span style="background:#d0d0d0"></span>base (τ=1) &nbsp;
+    <span style="background:rgba(160,50,160,0.8)"></span>resultante
+  </div>
+</div>
+
+<div id="chart"></div>
+<button class="action" onclick="sample()">Samplear</button>
+<div id="result"></div>
+<div id="info"></div>
+
+<script>
+const words = ["gato","perro","casa","sol","luna","rio","pan","luz","mar","viento","roca","flor","cielo","agua","fuego"];
+const logits = [1.2, 0.3, 2.1, -0.5, 1.8, 0.9, -0.2, 1.5, 0.1, 2.0, -0.8, 1.1, 0.6, -0.4, 1.7];
+const BARH = 120;
+
+function softmax(arr) {
+  const mx = Math.max(...arr);
+  const e = arr.map(x => Math.exp(x - mx));
+  const s = e.reduce((a,b) => a+b, 0);
+  return e.map(x => x/s);
+}
+
+const baseProbs = softmax(logits);
+const sortedIdx = baseProbs.map((p,i) => [p,i]).sort((a,b) => b[0]-a[0]).map(x => x[1]);
+let currentProbs = [];
+let method = 'topk';
+
+function setMethod(m, ev) {
+  method = m;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  ev.target.classList.add('active');
+  ['topk','topp','temp'].forEach(id => {
+    document.getElementById('ctrl-'+id).style.display = id === m ? '' : 'none';
+  });
+  document.getElementById('result').textContent = '';
+  update();
+}
+
+function update() {
+  const active = new Array(words.length).fill(false);
+  let sum = 0;
+
+  if (method === 'topk') {
+    const k = parseInt(document.querySelector('#ctrl-topk input').value);
+    sortedIdx.slice(0, k).forEach(i => active[i] = true);
+    sum = baseProbs.reduce((s,p,i) => active[i] ? s+p : s, 0);
+    currentProbs = baseProbs.map((p,i) => active[i] ? p/sum : 0);
+    renderChart(currentProbs, active, 'topk');
+    infoTopK(k, active, sum);
+
+  } else if (method === 'topp') {
+    const p = parseFloat(document.querySelector('#ctrl-topp input').value) / 100;
+    let cum = 0;
+    for (const idx of sortedIdx) {
+      active[idx] = true;
+      cum += baseProbs[idx];
+      if (cum >= p) break;
+    }
+    sum = baseProbs.reduce((s,prob,i) => active[i] ? s+prob : s, 0);
+    currentProbs = baseProbs.map((prob,i) => active[i] ? prob/sum : 0);
+    renderChart(currentProbs, active, 'topp');
+    infoTopP(p, active, sum);
+
+  } else {
+    const tau = parseFloat(document.querySelector('#ctrl-temp input').value) / 100;
+    currentProbs = softmax(logits.map(l => l / tau));
+    active.fill(true);
+    renderChart(currentProbs, active, 'temp');
+    infoTemp(tau);
+  }
+}
+
+function renderChart(probs, active, mode) {
+  const scaleMax = Math.max(Math.max(...baseProbs), Math.max(...probs));
+  const chart = document.getElementById('chart');
+  chart.innerHTML = '';
+
+  probs.forEach((p, i) => {
+    const col = document.createElement('div');
+    col.className = 'col';
+    const pair = document.createElement('div');
+    pair.className = 'pair';
+
+    const bBar = document.createElement('div');
+    bBar.className = 'b';
+    bBar.style.height = Math.round(baseProbs[i] / scaleMax * BARH) + 'px';
+
+    const rBar = document.createElement('div');
+    if (mode === 'temp') {
+      rBar.className = 'r temp-bar';
+    } else {
+      rBar.className = 'r ' + (active[i] ? 'selected' : 'discarded');
+    }
+    rBar.style.height = Math.round((active[i] ? p : baseProbs[i]) / scaleMax * BARH) + 'px';
+
+    pair.appendChild(bBar);
+    pair.appendChild(rBar);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'lbl';
+    lbl.textContent = words[i];
+
+    const pct = document.createElement('div');
+    pct.className = 'pct';
+    pct.textContent = (p*100).toFixed(1) + '%';
+
+    col.appendChild(pair);
+    col.appendChild(lbl);
+    col.appendChild(pct);
+    chart.appendChild(col);
+  });
+}
+
+function infoTopK(k, active, sum) {
+  const topWords = sortedIdx.slice(0, k);
+  const sumPct = (sum*100).toFixed(1);
+  const isAll = k === words.length;
+
+  const filas = topWords.map(i =>
+    `<tr><td>${words[i]}</td><td>${(baseProbs[i]*100).toFixed(1)}%</td><td>${(baseProbs[i]*100).toFixed(1)}% / ${sumPct}%</td><td><b>${(currentProbs[i]*100).toFixed(1)}%</b></td></tr>`
+  ).join('');
+
+  document.getElementById('info').innerHTML = isAll
+    ? `Con k = ${k} se incluyen todas las palabras: la distribución resultante es idéntica a la base.`
+    : `La red genera <b>p(w)</b> sobre todo el vocabulario. Se seleccionan las <b>top-${k} palabras más probables</b> (naranja) y se descartan las demás.<br><br>
+       Masa acumulada en el top-${k}: <b>${sumPct}%</b> &nbsp;|&nbsp; Descartada: <b>${(100-parseFloat(sumPct)).toFixed(1)}%</b><br><br>
+       Renormalización: <b>p'(w) = p(w) / ${sumPct}%</b> para cada w en el top-${k}<br><br>
+       <table><tr><th>palabra</th><th>p(w) base</th><th>renormalización</th><th>p'(w)</th></tr>${filas}</table>`;
+}
+
+function infoTopP(p, active, sum) {
+  const selectedIdx = sortedIdx.filter(i => active[i]);
+  const sumPct = (sum*100).toFixed(1);
+  const n = selectedIdx.length;
+  let cum = 0;
+  const filas = selectedIdx.map(i => {
+    cum += baseProbs[i];
+    return `<tr>
+      <td>${words[i]}</td>
+      <td>${(baseProbs[i]*100).toFixed(1)}%</td>
+      <td>${(cum*100).toFixed(1)}%</td>
+      <td>${(baseProbs[i]*100).toFixed(1)}% / ${sumPct}%</td>
+      <td><b>${(currentProbs[i]*100).toFixed(1)}%</b></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('info').innerHTML =
+    `La red genera <b>p(w)</b> sobre todo el vocabulario. En top-p se fija un umbral de <b>masa acumulada p = ${(p*100).toFixed(0)}%</b>.<br><br>
+     Se ordenan las palabras de mayor a menor y se suman hasta superar el umbral. 
+     El conjunto resultante tiene <b>${n} palabras</b> que acumulan <b>${sumPct}%</b>.<br><br>
+     A diferencia de top-k, el número de palabras varía: si la distribución es concentrada se necesitan pocas; si es plana, más.<br><br>
+     Renormalización: <b>p'(w) = p(w) / ${sumPct}%</b> para cada w en el núcleo<br><br>
+     <table>
+       <tr><th>palabra</th><th>p(w) base</th><th>acumulado</th><th>renormalización</th><th>p'(w)</th></tr>
+       ${filas}
+     </table>`;
+}
+
+function infoTemp(tau) {
+  const tauStr = tau.toFixed(2);
+  const isOne  = Math.abs(tau - 1.0) < 0.01;
+  const isLow  = tau <= 0.2;
+  const isHigh = tau >= 2.5;
+
+  const filas = sortedIdx.slice(0, 8).map(i => {
+    const logit  = logits[i].toFixed(2);
+    const scaled = (logits[i]/tau).toFixed(2);
+    return `<tr>
+      <td>${words[i]}</td>
+      <td>${logit}</td>
+      <td>${logit} / ${tauStr} = ${scaled}</td>
+      <td>${(baseProbs[i]*100).toFixed(1)}%</td>
+      <td><b>${(currentProbs[i]*100).toFixed(1)}%</b></td>
+    </tr>`;
+  }).join('');
+
+  const efecto = isOne
+    ? `<b>τ = 1:</b> distribución resultante idéntica a la base. El modelo samplea directamente de lo que aprendió.`
+    : tau < 1
+    ? `<b>τ = ${tauStr} < 1:</b> los logits se dividen por un número chico, por lo que se <b>agrandan</b> en valor absoluto, acentuando las diferencias entre palabras. La distribución se <b>concentra</b>: la palabra más probable acumula cada vez más masa a expensas de las demás.`
+    : `<b>τ = ${tauStr} > 1:</b> los logits se dividen por un número grande, por lo que se <b>achican</b>, reduciendo las diferencias entre palabras. La distribución se <b>aplana</b>: las palabras menos probables ganan masa relativa.`;
+
+  const limites = `
+    <br><b>Casos límite:</b><br><br>
+    <b>τ → 0 (temperatura muy baja):</b> los logits escalados tienden a ±∞. 
+    Tras el softmax, toda la masa colapsa en la palabra con mayor logit y su probabilidad tiende a 1. 
+    Equivale a <i>greedy decoding</i>: siempre se elige la palabra más probable, sin aleatoriedad.<br><br>
+    <b>τ → ∞ (temperatura muy alta):</b> los logits escalados tienden todos a 0. 
+    Tras el softmax, todas las palabras tienen la misma probabilidad: 1/|V|. 
+    Equivale a sampleo uniforme: cualquier palabra del vocabulario es igualmente probable, lo que genera texto incoherente.<br><br>
+    <b>Resumen:</b><br>
+    τ baja → más determinista, más repetitivo, más "seguro"<br>
+    τ = 1 → comportamiento base del modelo<br>
+    τ alta → más creativo, más diverso, más propenso a errores`;
+
+  document.getElementById('info').innerHTML =
+    `A diferencia de top-k y top-p, temperature <b>no trunca</b> la distribución: actúa sobre toda ella reshapeándola.<br><br>
+     Mecanismo: se dividen los logits por τ antes de aplicar softmax.<br><br>
+     <b>p'(w) = softmax(logit(w) / τ)</b><br><br>
+     ${efecto}<br>
+     ${limites}
+     <table>
+       <tr><th>palabra</th><th>logit</th><th>logit / τ</th><th>p(w) base</th><th>p'(w)</th></tr>
+       ${filas}
+     </table>
+     <br>(tabla con las 8 palabras más probables)`;
+}
+
+function sample() {
+  const r = Math.random();
+  let cum = 0;
+  for (let i = 0; i < currentProbs.length; i++) {
+    cum += currentProbs[i];
+    if (r <= cum) {
+      document.getElementById('result').textContent = 'Palabra elegida: ' + words[i];
+      return;
+    }
+  }
+}
+
+update();
+</script>
+</body>
+</html>
